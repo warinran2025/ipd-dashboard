@@ -471,9 +471,9 @@ select.fi{cursor:pointer}
       <div class="panel-header"><div class="panel-title"><span class="dot" style="background:var(--amber)"></span>ข้อมูลกิจกรรมสำคัญวันนี้</div><div id="act-date-badge" class="panel-badge">—</div></div>
       <div class="activity-grid">
         <div class="act-card crit"><div class="act-icon">💊</div><div class="act-label">CPR</div><div class="act-value" id="act-cpr">—</div></div>
-        <div class="act-card crit"><div class="act-icon">🫁</div><div class="act-label">On ET-Tube</div><div class="act-value" id="act-et">—</div></div>
+        <div class="act-card crit"><div class="act-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#c0392b"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg></div><div class="act-label">On ET-Tube</div><div class="act-value" id="act-et">—</div></div>
         <div class="act-card warn"><div class="act-icon">🚑</div><div class="act-label">Refer ออก</div><div class="act-value" id="act-refer">—</div></div>
-        <div class="act-card warn"><div class="act-icon">🩺</div><div class="act-label">On ICD</div><div class="act-value" id="act-icd">—</div></div>
+        <div class="act-card warn"><div class="act-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#c07800"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="act-label">On ICD</div><div class="act-value" id="act-icd">—</div></div>
       </div>
     </div>
 
@@ -481,8 +481,8 @@ select.fi{cursor:pointer}
       <div class="panel">
         <div class="panel-header"><div class="panel-title"><span class="dot" style="background:var(--g2)"></span>การเคลื่อนไหว 7 วันล่าสุด</div><div class="panel-badge" id="chart-range">—</div></div>
         <div style="display:flex;gap:10px;font-size:11px;color:var(--text2);margin-bottom:6px">
-          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:var(--g3);display:inline-block"></span>Admit</span>
-          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:var(--teal);display:inline-block"></span>Discharge</span>
+          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:#2d7a50;display:inline-block"></span>Admit</span>
+          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:#1565c0;display:inline-block"></span>Discharge</span>
           <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:var(--amber);display:inline-block"></span>Refer</span>
         </div>
         <div id="move-chart" style="display:flex;gap:4px;align-items:flex-end;height:70px"></div>
@@ -1644,7 +1644,7 @@ function buildTrendSVG(data){
   const grids=[0,25,50,75,100].map(p=>{const v=Math.round(mxV*p/100);const yy=Y(v);return `<line x1="${PL}" y1="${yy}" x2="${W-PR}" y2="${yy}" stroke="#c8dece" stroke-width="1" stroke-dasharray="4,3"/><text x="${PL-4}" y="${yy+4}" font-size="9" fill="#8aab93" text-anchor="end" font-family="IBM Plex Mono">${v}</text>`;}).join('');
   const xLbls=data.map((d,i)=>`<text x="${X(i)}" y="${H-4}" font-size="10" fill="#4a6b54" text-anchor="middle" font-family="Sarabun">${mLabel(d.month)}</text>`).join('');
   const areaP=data.map((d,i)=>`${X(i)},${Y(d.admit)}`).join(' ');
-  wrap.innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="aGr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#3fa06a" stop-opacity="0.16"/><stop offset="100%" stop-color="#3fa06a" stop-opacity="0"/></linearGradient></defs>${grids}<polygon points="${PL},${Y(0)} ${areaP} ${X(n-1)},${Y(0)}" fill="url(#aGr)"/>${ln(data.map(d=>d.admit),'#2d7a50')}${ln(data.map(d=>d.discharge),'#0d7377')}${ln(data.map(d=>d.refer),'#c07800','6,3')}${xLbls}</svg>`;
+  wrap.innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="aGr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2d7a50" stop-opacity="0.18"/><stop offset="100%" stop-color="#2d7a50" stop-opacity="0"/></linearGradient></defs>${grids}<polygon points="${PL},${Y(0)} ${areaP} ${X(n-1)},${Y(0)}" fill="url(#aGr)"/>${ln(data.map(d=>d.admit),'#2d7a50')}${ln(data.map(d=>d.discharge),'#1565c0')}${ln(data.map(d=>d.refer),'#c07800','6,3')}${xLbls}</svg>`;
 }
 
 // ── AE PAGE ───────────────────────────────────────────────
