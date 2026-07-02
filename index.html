@@ -1186,8 +1186,12 @@ async function loadAllFromSheets(){
     updateLastUpdated();
     hideLoading();
     refreshDaily();
-    toast(`✓ โหลดข้อมูลสำเร็จ — รายวัน ${dailyRecs.length} / AE ${aeRecs.length} / เฝ้าระวัง ${survRecs.length} รายการ`,'success',4000);
-
+    // อัพเดทหน้าที่กำลังดูอยู่ด้วย
+    const activeTab = document.querySelector('.tab.active');
+    if(activeTab){
+      if(activeTab.textContent.includes('เดือน')) buildMonthly();
+      if(activeTab.textContent.includes('เสี่ยง')) buildAEPage();
+    }
     // Sync queue ที่ค้างอยู่
     if(offQ.length>0) await syncQueue();
 
@@ -1495,14 +1499,11 @@ async function checkOnline(){
     const resp=await fetch(GAS_URL+'?action=ping');
     const r=await resp.json();
     if(r&&r.ok){
-      const wasOffline = !isOnline;
       isOnline=true; bar.className='sync-bar online';
       document.getElementById('syncIcon').textContent='🌐';
       msg.textContent=`✓ Google Sheets Real-time (v${r.version}) | อัพเดท ${new Date().toLocaleTimeString('th-TH')}`;
       updateQueueBadge();
-      // โหลดข้อมูลจาก Sheets ทันทีเมื่อเชื่อมต่อ
-      if(wasOffline) await loadAllFromSheets();
-      else if(offQ.length>0) await syncQueue();
+      if(offQ.length>0) await syncQueue();
     } else throw new Error('no ok');
   }catch(e){
     isOnline=false; bar.className='sync-bar offline';
@@ -1705,7 +1706,7 @@ async function saveAE(){
   clearInputs(['ae-hn','ae-bed','ae-detail','ae-action']);
   closeModal('mAE');
   toast(`AE: ${rec.type} — บันทึกแล้ว`,'error',5000);
-  try{if(isOnline){const r=await gasPost('saveAE',rec);if(r&&r.ok){rec.syncStatus='synced';const i=aeRecs.findIndex(x=>x.id===rec.id);if(i>=0){aeRecs[i]=rec;saveLS('ae',aeRecs);}toast('✓ AE บันทึกใน Sheets + แจ้ง Email','success'); setTimeout(()=>loadAllFromSheets(),500);}}else{addToQueue('ae',rec);toast('📵 Offline — AE รอ Sync','warn',4000);}}
+  try{if(isOnline){const r=await gasPost('saveAE',rec);if(r&&r.ok){rec.syncStatus='synced';const i=aeRecs.findIndex(x=>x.id===rec.id);if(i>=0){aeRecs[i]=rec;saveLS('ae',aeRecs);}toast('✓ AE บันทึกใน Sheets + แจ้ง Email','success'); setTimeout(()=>{loadAllFromSheets().then(()=>buildAEPage());},800);}}else{addToQueue('ae',rec);toast('📵 Offline — AE รอ Sync','warn',4000);}}
   catch(e){addToQueue('ae',rec);toast('⚠️ AE บันทึกในเครื่องแล้ว','warn',4000);}
   buildAEPage(); refreshDaily();
 }
@@ -2034,31 +2035,88 @@ function initApp(){
   document.getElementById('filterTo').value=todayStr;
   if(document.getElementById('ae-nurse')) document.getElementById('ae-nurse').value = currentUser||'';
 
-  // โหลด Cache ก่อนแสดงผลเร็ว ระหว่างรอ GSheets
-  dailyRecs=loadLS('daily');
-  aeRecs=loadLS('ae');
-  survRecs=loadLS('surv');
-  refreshDaily();
-
-  // เชื่อมต่อ GSheets และโหลดข้อมูลสดทันที
-  checkOnline();
+  // ★ โหลดจาก GSheets เป็นหลัก ทันทีที่เข้าระบบ ★
+  initDataLoad();
 
   // ตรวจสอบการเชื่อมต่อทุก 60 วินาที
   setInterval(checkOnline, 60000);
 
-  // ★ Auto-refresh ข้อมูลจาก GSheets ทุก 5 นาที ★
+  // ★ Auto-refresh ข้อมูลจาก GSheets ทุก 3 นาที ★
   if(autoRefreshTimer) clearInterval(autoRefreshTimer);
   autoRefreshTimer = setInterval(async()=>{
     if(isOnline){
       await loadAllFromSheets();
-      refreshDaily();
       const activeTab = document.querySelector('.tab.active');
       if(activeTab){
         if(activeTab.textContent.includes('เดือน')) buildMonthly();
         if(activeTab.textContent.includes('เสี่ยง')) buildAEPage();
       }
     }
-  }, 5*60*1000); // 5 นาที
+  }, 3*60*1000); // 3 นาที
+}
+
+// ★ โหลดข้อมูลครั้งแรก — ดึงจาก GSheets เสมอ ★
+async function initDataLoad(){
+  showLoading('กำลังโหลดข้อมูลสะสมจาก Google Sheets...','รอสักครู่ค่ะ');
+  try{
+    // ตรวจสอบการเชื่อมต่อก่อน
+    const pingResp = await fetch(GAS_URL+'?action=ping');
+    const pingData = await pingResp.json();
+    if(!pingData||!pingData.ok) throw new Error('GAS ไม่ตอบสนอง');
+
+    isOnline = true;
+    const bar=document.getElementById('syncBar');
+    const msg=document.getElementById('syncMsg');
+    if(bar) bar.className='sync-bar online';
+    if(msg) msg.textContent=`✓ Google Sheets เชื่อมต่อแล้ว (v${pingData.version})`;
+    document.getElementById('syncIcon').textContent='🌐';
+
+    // โหลดข้อมูลสะสมทั้งหมดจาก Sheets
+    const [rDaily,rAE,rSurv] = await Promise.all([
+      gasGet('getDaily'),
+      gasGet('getAE'),
+      gasGet('getSurv'),
+    ]);
+
+    if(rDaily&&rDaily.ok) { dailyRecs = parseGASRecords(rDaily.records,'daily'); saveLS('daily',dailyRecs); }
+    if(rAE&&rAE.ok)       { aeRecs    = parseGASRecords(rAE.records,'ae');       saveLS('ae',aeRecs); }
+    if(rSurv&&rSurv.ok)   { survRecs  = parseGASRecords(rSurv.records,'surv');   saveLS('surv',survRecs); }
+
+    updateLastUpdated();
+    hideLoading();
+    refreshDaily();
+
+    const total = dailyRecs.length + aeRecs.length + survRecs.length;
+    if(total > 0){
+      toast(`✓ โหลดข้อมูลสะสม ${dailyRecs.length} รายงาน / AE ${aeRecs.length} / เฝ้าระวัง ${survRecs.length} รายการ`,'success',5000);
+    } else {
+      toast('เชื่อมต่อสำเร็จ — ยังไม่มีข้อมูลใน Google Sheets','info',4000);
+    }
+
+    // Sync queue ที่ค้างอยู่ (กรณี offline ก่อนหน้า)
+    if(offQ.length>0) await syncQueue();
+
+  }catch(e){
+    isOnline = false;
+    const bar=document.getElementById('syncBar');
+    const msg=document.getElementById('syncMsg');
+    if(bar) bar.className='sync-bar offline';
+    if(msg) msg.textContent='📵 Offline — ใช้ข้อมูล Cache';
+    document.getElementById('syncIcon').textContent='📵';
+
+    // Fallback: ใช้ Cache
+    dailyRecs=loadLS('daily');
+    aeRecs=loadLS('ae');
+    survRecs=loadLS('surv');
+    hideLoading();
+    refreshDaily();
+
+    if(dailyRecs.length>0){
+      toast(`📵 ใช้ข้อมูล Cache — ${dailyRecs.length} รายการ (อาจไม่ใช่ล่าสุด)`,'warn',5000);
+    } else {
+      toast('📵 Offline และไม่มี Cache — บันทึกไว้ก่อน จะ Sync เมื่อออนไลน์','warn',5000);
+    }
+  }
 }
 </script>
 </body>
