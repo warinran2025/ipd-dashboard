@@ -1186,6 +1186,24 @@ async function loadAllFromSheets(){
 
     updateLastUpdated();
     hideLoading();
+
+    // ★ ถ้าไม่มีข้อมูลวันนี้ ให้ขยาย filter แสดง 30 วันอัตโนมัติ ★
+    const todayStr = fISO(new Date());
+    const hasTodayData = dailyRecs.some(r=>r.date===todayStr);
+    if(!hasTodayData && dailyRecs.length > 0){
+      // หาวันที่เก่าสุดและใหม่สุด
+      const dates = dailyRecs.map(r=>r.date).filter(Boolean).sort();
+      const oldest = dates[0];
+      const newest = dates[dates.length-1];
+      // ตั้ง filter ให้ครอบคลุมข้อมูลทั้งหมด
+      document.getElementById('filterFrom').value = oldest;
+      document.getElementById('filterTo').value   = todayStr;
+      filterFrom = oldest;
+      filterTo   = todayStr;
+      document.getElementById('filterBadge').style.display='inline-flex';
+      document.getElementById('filterInfo').textContent = `${thDateFromISO(oldest)} – วันนี้ (ข้อมูลล่าสุด: ${thDateFromISO(newest)})`;
+    }
+
     refreshDaily();
     // อัพเดทหน้าที่กำลังดูอยู่ด้วย
     const activeTab = document.querySelector('.tab.active');
@@ -1791,7 +1809,7 @@ function refreshDaily(){
     const cb=document.getElementById('b-census');
     if(cb){cb.className='kpi-badge '+(bor>90?'kb-alert':bor>80?'kb-warn':'kb-ok');cb.textContent=bor>90?'เต็ม!':bor>80?'ใกล้เต็ม':'ปกติ';}
   }
-  const bySh=f=>{const d=todayRecs.find(r=>r.shift==='ด');const c=todayRecs.find(r=>r.shift==='ช');const b=todayRecs.find(r=>r.shift==='บ');return `ด=${d?d[f]:'—'} ช=${c?c[f]:'—'} บ=${b?b[f]:'—'}`;};
+  const bySh=f=>{const d=displayRecs.find(r=>r.shift==='ด');const c=displayRecs.find(r=>r.shift==='ช');const b=displayRecs.find(r=>r.shift==='บ');return `ด=${d?d[f]:'—'} ช=${c?c[f]:'—'} บ=${b?b[f]:'—'}`;};
   set('s-admit',bySh('admit')); set('s-dc',bySh('discharge'));
 
   const totIC=todayRecs.reduce((a,r)=>a+(r.ic||0),0);const totCI=todayRecs.reduce((a,r)=>a+(r.ci||0),0);
@@ -1803,7 +1821,7 @@ function refreshDaily(){
   });
 
   ['ด','ช','บ'].forEach(sh=>{
-    const r=todayRecs.find(x=>x.shift===sh);const p=r?r.prod:0;
+    const r=displayRecs.find(x=>x.shift===sh);const p=r?r.prod:0;
     const id={ด:'d',ช:'ch',บ:'b'}[sh];
     const b=document.getElementById('pbar-'+id);if(b){b.style.width=Math.min(p,150)+'%';b.textContent=p?p+'%':'—';}
     set('pval-'+id,p?p+'%':'—');
@@ -1811,8 +1829,8 @@ function refreshDaily(){
     if(b) b.style.background=col;
   });
 
-  set('rn-disp',todayRecs.map(r=>r.rn).join('+')||'—');
-  set('na-disp',todayRecs.map(r=>r.na).join('+')||'—');
+  set('rn-disp',displayRecs.map(r=>r.rn).join('+')||'—');
+  set('na-disp',displayRecs.map(r=>r.na).join('+')||'—');
 
   const totPT=totIC+totCI+totSI+totMI+totCL;
   const sumRN=todayRecs.reduce((a,r)=>a+r.rn,0);
@@ -1831,10 +1849,10 @@ function refreshDaily(){
 
   const actDate=document.getElementById('act-date-badge');
   if(actDate) actDate.textContent=fD(new Date());
-  set('act-cpr', todayRecs.reduce((a,r)=>a+(r.cpr||0),0)||'—');
-  set('act-et',  todayRecs.reduce((a,r)=>a+(r.et||0),0)||'—');
-  set('act-refer',todayRecs.reduce((a,r)=>a+(r.refer||0),0)||'—');
-  set('act-icd', todayRecs.reduce((a,r)=>a+(r.icd||0),0)||'—');
+  set('act-cpr', displayRecs.reduce((a,r)=>a+(r.cpr||0),0)||'—');
+  set('act-et',  displayRecs.reduce((a,r)=>a+(r.et||0),0)||'—');
+  set('act-refer',displayRecs.reduce((a,r)=>a+(r.refer||0),0)||'—');
+  set('act-icd', displayRecs.reduce((a,r)=>a+(r.icd||0),0)||'—');
 
   buildMoveChart(); buildSurv(); buildDailyAlerts(todayRecs);
   updateDailyProdPreview();
@@ -2159,6 +2177,16 @@ async function initDataLoad(){
     aeRecs=loadLS('ae');
     survRecs=loadLS('surv');
     hideLoading();
+
+    // Auto filter สำหรับ cache ด้วย
+    const todayStrC = fISO(new Date());
+    if(!dailyRecs.some(r=>r.date===todayStrC) && dailyRecs.length>0){
+      const datesC = dailyRecs.map(r=>r.date).filter(Boolean).sort();
+      document.getElementById('filterFrom').value = datesC[0];
+      document.getElementById('filterTo').value   = todayStrC;
+      filterFrom = datesC[0];
+      filterTo   = todayStrC;
+    }
     refreshDaily();
 
     if(dailyRecs.length>0){
