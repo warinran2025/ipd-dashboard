@@ -1783,15 +1783,16 @@ function refreshDaily(){
     }
   }
 
-  const todayRecs=dailyRecs.filter(r=>r.date===today);
+    const todayRecs = dailyRecs.filter(r=>r.date===today);
+  const displayRecs = todayRecs.length > 0 ? todayRecs : filtered;
 
-  const sumA=todayRecs.reduce((a,r)=>a+r.admit,0);
-  const sumD=todayRecs.reduce((a,r)=>a+r.discharge,0);
-  const sumR=todayRecs.reduce((a,r)=>a+r.refer,0);
-  // ถ้าไม่มีข้อมูลวันนี้ ให้ใช้ข้อมูลล่าสุดแทนเพื่อแสดง KPI
-  const last=todayRecs.length?todayRecs[todayRecs.length-1]:null;
+  const sumA = displayRecs.reduce((a,r)=>a+r.admit,0);
+  const sumD = displayRecs.reduce((a,r)=>a+r.discharge,0);
+  const sumR = displayRecs.reduce((a,r)=>a+r.refer,0);
+  const last = displayRecs.length ? displayRecs[displayRecs.length-1] : null;
   const latestDate = dailyRecs.length ? [...dailyRecs].sort((a,b)=>b.date.localeCompare(a.date))[0]?.date : null;
-  const avgP=todayRecs.length?Math.round(todayRecs.reduce((a,r)=>a+r.prod,0)/todayRecs.length):null;
+  const latestDate = dailyRecs.length ? [...dailyRecs].sort((a,b)=>b.date.localeCompare(a.date))[0]?.date : null;
+  const avgP=displayRecs.length?Math.round(displayRecs.reduce((a,r)=>a+r.prod,0)/displayRecs.length):null;
 
   set('v-census',last?last.census:'—'); set('v-admit',todayRecs.length?sumA:'—');
   set('v-dc',todayRecs.length?sumD:'—'); set('v-refer',todayRecs.length?sumR:'—');
@@ -1812,8 +1813,8 @@ function refreshDaily(){
   const bySh=f=>{const d=displayRecs.find(r=>r.shift==='ด');const c=displayRecs.find(r=>r.shift==='ช');const b=displayRecs.find(r=>r.shift==='บ');return `ด=${d?d[f]:'—'} ช=${c?c[f]:'—'} บ=${b?b[f]:'—'}`;};
   set('s-admit',bySh('admit')); set('s-dc',bySh('discharge'));
 
-  const totIC=todayRecs.reduce((a,r)=>a+(r.ic||0),0);const totCI=todayRecs.reduce((a,r)=>a+(r.ci||0),0);
-  const totSI=todayRecs.reduce((a,r)=>a+(r.si||0),0);const totMI=todayRecs.reduce((a,r)=>a+(r.mi||0),0);const totCL=todayRecs.reduce((a,r)=>a+(r.cl||0),0);
+  const totIC=displayRecs.reduce((a,r)=>a+(r.ic||0),0);const totCI=displayRecs.reduce((a,r)=>a+(r.ci||0),0);
+  const totSI=displayRecs.reduce((a,r)=>a+(r.si||0),0);const totMI=displayRecs.reduce((a,r)=>a+(r.mi||0),0);const totCL=displayRecs.reduce((a,r)=>a+(r.cl||0),0);
   const mxPT=Math.max(totIC,totCI,totSI,totMI,totCL,1);
   [['ic',totIC],['ci',totCI],['si',totSI],['mi',totMI],['cl',totCL]].forEach(([k,v])=>{
     const b=document.getElementById('ptbar-'+k);if(b){b.style.width=Math.round(v/mxPT*100)+'%';b.textContent=v;}
@@ -1833,10 +1834,10 @@ function refreshDaily(){
   set('na-disp',displayRecs.map(r=>r.na).join('+')||'—');
 
   const totPT=totIC+totCI+totSI+totMI+totCL;
-  const sumRN=todayRecs.reduce((a,r)=>a+r.rn,0);
+  const sumRN=displayRecs.reduce((a,r)=>a+r.rn,0);
   if(totPT>0&&sumRN>0&&last){
     set('nhppd-v',((sumRN*8)/Math.max(last.census||1,1)).toFixed(1)+' ชม.');
-    set('ptrn-v',(last.census/(sumRN/Math.max(todayRecs.length,1))).toFixed(1)+' คน');
+    set('ptrn-v',(last.census/(sumRN/Math.max(displayRecs.length,1))).toFixed(1)+' คน');
   }
 
   if(avgP!==null){
@@ -1854,9 +1855,12 @@ function refreshDaily(){
   set('act-refer',displayRecs.reduce((a,r)=>a+(r.refer||0),0)||'—');
   set('act-icd', displayRecs.reduce((a,r)=>a+(r.icd||0),0)||'—');
 
-  buildMoveChart(); buildSurv(); buildDailyAlerts(todayRecs);
+  buildMoveChart(); buildSurv(); buildDailyAlerts(displayRecs);
   updateDailyProdPreview();
   set('daily-count',`${filtered.length} รายการ`);
+  // แสดง badge วันที่แสดงผล
+  const actDate=document.getElementById('act-date-badge');
+  if(actDate) actDate.textContent = displayRecs.length>0 ? (displayRecs[displayRecs.length-1].dateDisplay||fD(new Date())) : fD(new Date());
 }
 
 function getFilteredDailyRecs(){
