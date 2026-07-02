@@ -324,6 +324,19 @@ select.fi{cursor:pointer}
 .app-footer{text-align:center;padding:22px 14px 14px;margin-top:18px;border-top:1px solid var(--bd);font-size:12px;color:var(--text3);line-height:1.8}
 .app-footer strong{color:var(--g2)}
 
+
+/* ── LOADING SPINNER ── */
+.loading-overlay{position:fixed;inset:0;background:rgba(240,245,242,.85);backdrop-filter:blur(4px);z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.spinner{width:48px;height:48px;border:4px solid var(--bd);border-top-color:var(--g2);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:14px;color:var(--g2);font-weight:600}
+.loading-sub{font-size:12px;color:var(--text3)}
+/* ── REALTIME BADGE ── */
+.rt-badge{display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,var(--g6),#e0f4eb);border:1px solid var(--g4);border-radius:18px;padding:4px 11px;font-size:11px;color:var(--g1);font-weight:700}
+.rt-dot{width:7px;height:7px;border-radius:50%;background:var(--g3);animation:pulse 2s infinite}
+/* ── LAST UPDATED ── */
+.last-updated{font-size:11px;color:var(--text3);font-family:var(--mono)}
+
 /* ── PRINT ── */
 @media print{
   body{background:#fff !important;color:#000 !important;font-size:10pt}
@@ -383,6 +396,12 @@ select.fi{cursor:pointer}
 
 <!-- ══════════════ APP CONTENT ══════════════ -->
 <div id="appContent">
+<!-- LOADING OVERLAY -->
+<div id="loadingOverlay" class="loading-overlay" style="display:none">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">กำลังโหลดข้อมูลจาก Google Sheets...</div>
+  <div class="loading-sub" id="loadingSub">Real-time Sync</div>
+</div>
 <div class="wrap">
 
   <!-- PRINT HEADER -->
@@ -396,12 +415,13 @@ select.fi{cursor:pointer}
   <div class="topbar no-print">
     <div class="logo-block">
       <div class="logo-icon">🏥</div>
-      <div><div class="logo-title">IPD Donchan Dashboard <span style="font-size:11px;opacity:.7;font-family:var(--mono)">v7.0</span></div>
+      <div><div class="logo-title">IPD Donchan Dashboard <span style="font-size:11px;opacity:.7;font-family:var(--mono)">v8.0</span></div>
       <div class="logo-sub">หอผู้ป่วยใน — รพ.ดอนจาน 30 เตียง</div></div>
     </div>
     <div class="topbar-right">
       <span class="role-badge" id="roleBadge">📝 Reporter</span>
-      <div class="live-badge"><span class="live-dot"></span>LIVE</div>
+      <div class="rt-badge"><span class="rt-dot"></span>Real-time GSheets</div>
+      <div class="last-updated" id="lastUpdated">—</div>
       <div class="date-display" id="dtDisp">--</div>
       <div class="shift-selector">
         <button class="shift-btn active" onclick="selShift(this,'ด')">เวรดึก</button>
@@ -410,6 +430,7 @@ select.fi{cursor:pointer}
       </div>
       <button class="btn btn-primary reporter-only" onclick="openReportModal()">📋 บันทึกรายงาน</button>
       <button class="btn btn-admin admin-only" onclick="openAdminPanel()">🔑 Admin Panel</button>
+      <button class="btn btn-ghost" onclick="loadAllFromSheets()" style="font-size:12px;padding:5px 11px;color:var(--g1)">🔄 รีเฟรช</button>
       <button class="btn-logout" onclick="doLogout()">🚪 ออก</button>
     </div>
   </div>
@@ -624,7 +645,7 @@ select.fi{cursor:pointer}
 
   <!-- FOOTER -->
   <div class="app-footer">
-    IPD Donchan Dashboard v7.0 — ระบบรายงานผลการปฏิบัติงานหอผู้ป่วยใน<br>
+    IPD Donchan Dashboard v8.0 — ระบบรายงานผลการปฏิบัติงานหอผู้ป่วยใน<br>
     พัฒนาโดย <strong>นางสาวศิริณา รังกลิ่น</strong> พยาบาลวิชาชีพชำนาญการพิเศษ โรงพยาบาลดอนจาน
   </div>
 
@@ -1092,12 +1113,173 @@ async function adminRebuildMonthly(){
   }catch(e){ toast('Rebuild ล้มเหลว: '+e.message,'error'); }
 }
 
-// ── STORAGE ──────────────────────────────────────────────────
-const KEY={daily:'ipd7_daily',ae:'ipd7_ae',surv:'ipd7_surv',queue:'ipd7_queue'};
+// ══════════════════════════════════════════════════════════════
+// ★ v8 REAL-TIME ARCHITECTURE ★
+// Google Sheets = Source of Truth
+// localStorage = Offline cache เท่านั้น
+// ══════════════════════════════════════════════════════════════
+const KEY={daily:'ipd8_daily',ae:'ipd8_ae',surv:'ipd8_surv',queue:'ipd8_queue'};
 const loadLS=k=>{try{return JSON.parse(localStorage.getItem(KEY[k])||'[]');}catch(e){return[];}};
 const saveLS=(k,d)=>{try{localStorage.setItem(KEY[k],JSON.stringify(d));}catch(e){}};
-let dailyRecs=loadLS('daily'),aeRecs=loadLS('ae'),survRecs=loadLS('surv'),offQ=loadLS('queue');
+
+// In-memory state — โหลดจาก GSheets ทุกครั้งที่ Login
+let dailyRecs=[],aeRecs=[],survRecs=[],offQ=loadLS('queue');
 let isOnline=false,filterFrom=null,filterTo=null;
+let lastSyncTime=null,autoRefreshTimer=null;
+
+// ── แสดง/ซ่อน Loading Overlay ──────────────────────────────
+function showLoading(msg='กำลังโหลดข้อมูล...',sub='Real-time Sync'){
+  const el=document.getElementById('loadingOverlay');
+  const tm=document.getElementById('loadingText');
+  const ts=document.getElementById('loadingSub');
+  if(el){el.style.display='flex';}
+  if(tm) tm.textContent=msg;
+  if(ts) ts.textContent=sub;
+}
+function hideLoading(){
+  const el=document.getElementById('loadingOverlay');
+  if(el) el.style.display='none';
+}
+
+// ── อัพเดทเวลา Last Updated ──────────────────────────────────
+function updateLastUpdated(){
+  lastSyncTime=new Date();
+  const el=document.getElementById('lastUpdated');
+  if(el){
+    const h=String(lastSyncTime.getHours()).padStart(2,'0');
+    const m=String(lastSyncTime.getMinutes()).padStart(2,'0');
+    const s=String(lastSyncTime.getSeconds()).padStart(2,'0');
+    el.textContent=`อัพเดท ${h}:${m}:${s}`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ★ โหลดข้อมูลทั้งหมดจาก Google Sheets ★
+// ══════════════════════════════════════════════════════════════
+async function loadAllFromSheets(){
+  if(!isOnline){
+    toast('ไม่มีการเชื่อมต่อ — ใช้ข้อมูลจาก Cache','warn');
+    return;
+  }
+  showLoading('กำลังโหลดข้อมูลจาก Google Sheets...','โปรดรอสักครู่');
+  try{
+    // โหลดพร้อมกันทั้ง 3 ชุดข้อมูล
+    const [rDaily,rAE,rSurv] = await Promise.all([
+      gasGet('getDaily'),
+      gasGet('getAE'),
+      gasGet('getSurv'),
+    ]);
+
+    if(rDaily&&rDaily.ok){
+      dailyRecs = parseGASRecords(rDaily.records,'daily');
+      saveLS('daily',dailyRecs);
+    }
+    if(rAE&&rAE.ok){
+      aeRecs = parseGASRecords(rAE.records,'ae');
+      saveLS('ae',aeRecs);
+    }
+    if(rSurv&&rSurv.ok){
+      survRecs = parseGASRecords(rSurv.records,'surv');
+      saveLS('surv',survRecs);
+    }
+
+    updateLastUpdated();
+    hideLoading();
+    refreshDaily();
+    toast(`✓ โหลดข้อมูลสำเร็จ — รายวัน ${dailyRecs.length} / AE ${aeRecs.length} / เฝ้าระวัง ${survRecs.length} รายการ`,'success',4000);
+
+    // Sync queue ที่ค้างอยู่
+    if(offQ.length>0) await syncQueue();
+
+  }catch(e){
+    hideLoading();
+    // Fallback ใช้ Cache
+    dailyRecs=loadLS('daily');
+    aeRecs=loadLS('ae');
+    survRecs=loadLS('surv');
+    toast('โหลดจาก Sheets ไม่สำเร็จ — ใช้ข้อมูล Cache: '+e.message,'warn',5000);
+    refreshDaily();
+  }
+}
+
+// ── แปลงข้อมูลจาก GAS response เป็น format ที่ Dashboard ใช้ ──
+function parseGASRecords(records,type){
+  if(!Array.isArray(records)) return [];
+  return records.map(r=>{
+    if(type==='daily'){
+      return {
+        id:          r['ID']||Date.now(),
+        date:        r['วันที่ (YYYY-MM-DD)']||'',
+        dateDisplay: r['วันที่ (แสดงผล)']||'',
+        shift:       r['เวร (ด/ช/บ)']||'',
+        shiftName:   r['ชื่อเวร']||'',
+        owner:       r['ผู้บันทึก']||'',
+        census:      Number(r['Census (ยอดผู้ป่วย)'])||0,
+        admit:       Number(r['Admit รับเข้า'])||0,
+        discharge:   Number(r['Discharge จำหน่าย'])||0,
+        refer:       Number(r['Refer ออก'])||0,
+        dead:        Number(r['Dead เสียชีวิต'])||0,
+        referDest:   r['Refer ปลายทาง/เหตุผล']||'',
+        rn:          Number(r['RN จำนวน'])||0,
+        na:          Number(r['NA จำนวน'])||0,
+        prod:        Number(r['Productivity % (คำนวณอัตโนมัติ)'])||0,
+        ic:          Number(r['IC ประเภท5 (9.0 ชม.)'])||0,
+        ci:          Number(r['CI ประเภท4 (7.5 ชม.)'])||0,
+        si:          Number(r['SI ประเภท3 (5.5 ชม.)'])||0,
+        mi:          Number(r['MI ประเภท2 (3.5 ชม.)'])||0,
+        cl:          Number(r['CL ประเภท1 (1.5 ชม.)'])||0,
+        iv:          Number(r['On IV Fluid (ครั้ง)'])||0,
+        chart:       Number(r['Chart รับใหม่'])||0,
+        dtx:         Number(r['ตรวจ DTX (ครั้ง)'])||0,
+        inject:      Number(r['ฉีดยา IV/IM/SC (ครั้ง)'])||0,
+        icd:         Number(r['On ICD (ครั้ง)'])||0,
+        wound:       Number(r['ทำแผล (ครั้ง)'])||0,
+        cpr:         Number(r['CPR (ครั้ง)'])||0,
+        et:          Number(r['On ET-Tube (ครั้ง)'])||0,
+        ama:         Number(r['หนีกลับ (AMA) (ราย)'])||0,
+        aeNote:      r['AE Note']||'',
+        note:        r['ข้อสังเกต/ส่งต่อ']||'',
+        syncStatus:  'synced',
+      };
+    }
+    if(type==='ae'){
+      return {
+        id:           r['ID']||Date.now(),
+        date:         r['วันที่ (YYYY-MM-DD)']||'',
+        dateDisplay:  r['วันที่ (แสดงผล)']||'',
+        owner:        r['ผู้บันทึก (Owner)']||'',
+        riskCategory: r['ประเภทความเสี่ยง']||'',
+        type:         r['ประเภทเหตุการณ์']||'',
+        level:        r['ระดับความรุนแรง']||'',
+        hn:           r['HN ผู้ป่วย']||'—',
+        shift:        r['เวร']||'',
+        bed:          r['เตียง']||'—',
+        nurse:        r['ผู้บันทึก']||'',
+        detail:       r['รายละเอียดเหตุการณ์']||'',
+        action:       r['มาตรการแก้ไขเบื้องต้น']||'',
+        status:       r['สถานะ']||'รอติดตาม',
+        syncStatus:   'synced',
+      };
+    }
+    if(type==='surv'){
+      return {
+        id:          r['ID']||Date.now(),
+        date:        r['วันที่ (YYYY-MM-DD)']||'',
+        dateDisplay: r['วันที่ (แสดงผล)']||'',
+        shift:       r['เวร (ด/ช/บ)']||'',
+        shiftName:   r['ชื่อเวร']||'',
+        owner:       r['ผู้บันทึก']||'',
+        sepsis:      Number(r['Sepsis (ราย)'])||0,
+        stroke:      Number(r['Stroke (ราย)'])||0,
+        stemi:       Number(r['STEMI (ราย)'])||0,
+        mdr:         Number(r['MDR (ราย)'])||0,
+        note:        r['หมายเหตุ']||'',
+        syncStatus:  'synced',
+      };
+    }
+    return r;
+  });
+}
 
 // ── DATE HELPERS ──────────────────────────────────────────────
 const TH_M=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
@@ -1289,6 +1471,15 @@ async function gasPost(action,data){
   return resp.json();
 }
 
+// ★ GET request — โหลดข้อมูลจาก GAS ★
+async function gasGet(action,params={}){
+  if(!GAS_URL||GAS_URL.includes('YOUR_DEPLOYMENT_ID')) throw new Error('GAS_URL ยังไม่ได้ตั้งค่า');
+  const qs = new URLSearchParams({action,...params}).toString();
+  const resp = await fetch(`${GAS_URL}?${qs}`);
+  if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
 async function checkOnline(){
   const bar=document.getElementById('syncBar');
   const msg=document.getElementById('syncMsg');
@@ -1304,16 +1495,19 @@ async function checkOnline(){
     const resp=await fetch(GAS_URL+'?action=ping');
     const r=await resp.json();
     if(r&&r.ok){
+      const wasOffline = !isOnline;
       isOnline=true; bar.className='sync-bar online';
       document.getElementById('syncIcon').textContent='🌐';
-      msg.textContent=`✓ Google Sheets เชื่อมต่อแล้ว (v${r.version})`;
+      msg.textContent=`✓ Google Sheets Real-time (v${r.version}) | อัพเดท ${new Date().toLocaleTimeString('th-TH')}`;
       updateQueueBadge();
-      if(offQ.length>0) await syncQueue();
+      // โหลดข้อมูลจาก Sheets ทันทีเมื่อเชื่อมต่อ
+      if(wasOffline) await loadAllFromSheets();
+      else if(offQ.length>0) await syncQueue();
     } else throw new Error('no ok');
   }catch(e){
     isOnline=false; bar.className='sync-bar offline';
     document.getElementById('syncIcon').textContent='📵';
-    msg.textContent='Offline — ข้อมูลจะ Sync อัตโนมัติเมื่อออนไลน์';
+    msg.textContent='📵 Offline — ใช้ข้อมูล Cache | จะโหลดใหม่เมื่อออนไลน์';
     updateQueueBadge();
   }
 }
@@ -1373,7 +1567,7 @@ async function saveReport(){
   if(rec.dead>0) toast(`🔴 Dead ${rec.dead} ราย — ทำรายงานทันที`,'error',7000);
   if(rec.ama>0) toast(`🚶 หนีกลับ ${rec.ama} ราย — บันทึกแล้ว`,'warn',5000);
   try{
-    if(isOnline){const r=await gasPost('saveDaily',rec);if(r&&r.ok){rec.syncStatus='synced';const i=dailyRecs.findIndex(x=>x.id===rec.id);if(i>=0){dailyRecs[i]=rec;saveLS('daily',dailyRecs);}toast(`✓ บันทึกใน Google Sheets แถว ${r.row}`,'success');}else throw new Error(r?.error);}
+    if(isOnline){const r=await gasPost('saveDaily',rec);if(r&&r.ok){rec.syncStatus='synced';const i=dailyRecs.findIndex(x=>x.id===rec.id);if(i>=0){dailyRecs[i]=rec;saveLS('daily',dailyRecs);}toast(`✓ บันทึกใน Google Sheets แถว ${r.row}`,'success'); setTimeout(()=>loadAllFromSheets(),500);}else throw new Error(r?.error);}
     else{addToQueue('daily',rec);toast('📵 Offline — รอ Sync','warn',4000);}
   }catch(e){addToQueue('daily',rec);toast('⚠️ บันทึกในเครื่องแล้ว: '+e.message,'warn',5000);}
 
@@ -1511,7 +1705,7 @@ async function saveAE(){
   clearInputs(['ae-hn','ae-bed','ae-detail','ae-action']);
   closeModal('mAE');
   toast(`AE: ${rec.type} — บันทึกแล้ว`,'error',5000);
-  try{if(isOnline){const r=await gasPost('saveAE',rec);if(r&&r.ok){rec.syncStatus='synced';const i=aeRecs.findIndex(x=>x.id===rec.id);if(i>=0){aeRecs[i]=rec;saveLS('ae',aeRecs);}toast('✓ AE บันทึกใน Sheets + แจ้ง Email','success');}}else{addToQueue('ae',rec);toast('📵 Offline — AE รอ Sync','warn',4000);}}
+  try{if(isOnline){const r=await gasPost('saveAE',rec);if(r&&r.ok){rec.syncStatus='synced';const i=aeRecs.findIndex(x=>x.id===rec.id);if(i>=0){aeRecs[i]=rec;saveLS('ae',aeRecs);}toast('✓ AE บันทึกใน Sheets + แจ้ง Email','success'); setTimeout(()=>loadAllFromSheets(),500);}}else{addToQueue('ae',rec);toast('📵 Offline — AE รอ Sync','warn',4000);}}
   catch(e){addToQueue('ae',rec);toast('⚠️ AE บันทึกในเครื่องแล้ว','warn',4000);}
   buildAEPage(); refreshDaily();
 }
@@ -1675,7 +1869,7 @@ async function delRecord(id){
   if(!confirm('ลบรายการนี้?')) return;
   dailyRecs=dailyRecs.filter(r=>r.id!==id); saveLS('daily',dailyRecs);
   if(isOnline){try{await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'deleteRow',sheet:'daily',id})});}catch(e){}}
-  toast('ลบเรียบร้อย','info'); refreshDaily();
+  toast('ลบเรียบร้อย','info'); refreshDaily(); if(isOnline) setTimeout(()=>loadAllFromSheets(),500);
 }
 async function delAE(id){
   const rec = aeRecs.find(r=>r.id===id);
@@ -1683,7 +1877,7 @@ async function delAE(id){
   if(!confirm('ลบ AE นี้?')) return;
   aeRecs=aeRecs.filter(r=>r.id!==id); saveLS('ae',aeRecs);
   if(isOnline){try{await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'deleteRow',sheet:'ae',id})});}catch(e){}}
-  toast('ลบ AE เรียบร้อย','info'); buildAEPage(); refreshDaily();
+  toast('ลบ AE เรียบร้อย','info'); buildAEPage(); refreshDaily(); if(isOnline) setTimeout(()=>loadAllFromSheets(),500);
 }
 function clearTodayConfirm(){
   if(currentRole!=='admin'){ toast('เฉพาะ Admin เท่านั้นที่ลบข้อมูลทั้งวันได้','warn'); return; }
@@ -1801,7 +1995,7 @@ function doExport(fmt,type){
     if((type==='ae'||type==='all')&&aeRecs.length){const hd=['วันที่','ประเภทความเสี่ยง','ประเภทเหตุการณ์','ระดับ','HN','เวร','เตียง','ผู้บันทึก','รายละเอียด','การแก้ไข','สถานะ'];const rows=aeRecs.map(r=>[r.dateDisplay,r.riskCategory==='clinic'?'Clinical':r.riskCategory==='non-clinic'?'Non-Clinical':'—',r.type,r.level,r.hn,r.shift,r.bed,r.nurse,r.detail,r.action,r.status]);XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([hd,...rows]),'AE NearMiss');}
     if((type==='daily'||type==='all')&&survRecs.length){const hd=['วันที่','เวร','ผู้บันทึก','Sepsis','Stroke','STEMI','MDR','หมายเหตุ'];const rows=survRecs.map(r=>[r.dateDisplay,r.shiftName,r.owner||'—',r.sepsis||0,r.stroke||0,r.stemi||0,r.mdr||0,r.note||'']);XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([hd,...rows]),'ผู้ป่วยเฝ้าระวัง');}
     if(!wb.SheetNames.length){toast('ไม่มีข้อมูล','info');return;}
-    XLSX.writeFile(wb,`IPD_Dashboard_v7_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb,`IPD_Dashboard_v8_${new Date().toISOString().split('T')[0]}.xlsx`);
     toast('Export Excel สำเร็จ ✓');
   } else {
     let csv='',fname='';
@@ -1839,9 +2033,32 @@ function initApp(){
   document.getElementById('filterFrom').value=todayStr;
   document.getElementById('filterTo').value=todayStr;
   if(document.getElementById('ae-nurse')) document.getElementById('ae-nurse').value = currentUser||'';
+
+  // โหลด Cache ก่อนแสดงผลเร็ว ระหว่างรอ GSheets
+  dailyRecs=loadLS('daily');
+  aeRecs=loadLS('ae');
+  survRecs=loadLS('surv');
   refreshDaily();
+
+  // เชื่อมต่อ GSheets และโหลดข้อมูลสดทันที
   checkOnline();
-  setInterval(checkOnline,60000);
+
+  // ตรวจสอบการเชื่อมต่อทุก 60 วินาที
+  setInterval(checkOnline, 60000);
+
+  // ★ Auto-refresh ข้อมูลจาก GSheets ทุก 5 นาที ★
+  if(autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(async()=>{
+    if(isOnline){
+      await loadAllFromSheets();
+      refreshDaily();
+      const activeTab = document.querySelector('.tab.active');
+      if(activeTab){
+        if(activeTab.textContent.includes('เดือน')) buildMonthly();
+        if(activeTab.textContent.includes('เสี่ยง')) buildAEPage();
+      }
+    }
+  }, 5*60*1000); // 5 นาที
 }
 </script>
 </body>
