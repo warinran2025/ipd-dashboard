@@ -453,6 +453,7 @@ select.fi{cursor:pointer}
     <button class="btn-filter-clear" onclick="clearFilter()">✕ ล้าง</button>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:auto">
       <button class="btn-filter-clear" onclick="setQuickRange(0)">วันนี้</button>
+      <button class="btn-filter-clear" onclick="setLatestDate()" style="color:var(--g2);border-color:var(--g4)">📅 วันล่าสุด</button>
       <button class="btn-filter-clear" onclick="setQuickRange(7)">7 วัน</button>
       <button class="btn-filter-clear" onclick="setQuickRange(30)">30 วัน</button>
       <button class="btn-filter-clear" onclick="setQuickRange(90)">3 เดือน</button>
@@ -1206,6 +1207,31 @@ async function loadAllFromSheets(){
   }
 }
 
+// ── Normalize วันที่จาก GSheets ให้เป็น YYYY-MM-DD เสมอ ──────
+function normalizeDate(val){
+  if(!val) return '';
+  const s = String(val).trim();
+  // รูปแบบ YYYY-MM-DD อยู่แล้ว
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // รูปแบบ M/D/YYYY หรือ D/M/YYYY (Google Sheets default)
+  if(/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)){
+    const parts = s.split('/');
+    // Google Sheets ใช้ M/D/YYYY
+    const m = parts[0].padStart(2,'0');
+    const d = parts[1].padStart(2,'0');
+    const y = parts[2];
+    return `${y}-${m}-${d}`;
+  }
+  // พยายาม parse แบบอื่น
+  try{
+    const dt = new Date(val);
+    if(!isNaN(dt.getTime())){
+      return dt.toISOString().split('T')[0];
+    }
+  }catch(e){}
+  return s;
+}
+
 // ── แปลงข้อมูลจาก GAS response เป็น format ที่ Dashboard ใช้ ──
 function parseGASRecords(records,type){
   if(!Array.isArray(records)) return [];
@@ -1213,7 +1239,7 @@ function parseGASRecords(records,type){
     if(type==='daily'){
       return {
         id:          r['ID']||Date.now(),
-        date:        r['วันที่ (YYYY-MM-DD)']||'',
+        date:        normalizeDate(r['วันที่ (YYYY-MM-DD)'])||'',
         dateDisplay: r['วันที่ (แสดงผล)']||'',
         shift:       r['เวร (ด/ช/บ)']||'',
         shiftName:   r['ชื่อเวร']||'',
@@ -1249,7 +1275,7 @@ function parseGASRecords(records,type){
     if(type==='ae'){
       return {
         id:           r['ID']||Date.now(),
-        date:         r['วันที่ (YYYY-MM-DD)']||'',
+        date:         normalizeDate(r['วันที่ (YYYY-MM-DD)'])||'',
         dateDisplay:  r['วันที่ (แสดงผล)']||'',
         owner:        r['ผู้บันทึก (Owner)']||'',
         riskCategory: r['ประเภทความเสี่ยง']||'',
@@ -1268,7 +1294,7 @@ function parseGASRecords(records,type){
     if(type==='surv'){
       return {
         id:          r['ID']||Date.now(),
-        date:        r['วันที่ (YYYY-MM-DD)']||'',
+        date:        normalizeDate(r['วันที่ (YYYY-MM-DD)'])||'',
         dateDisplay: r['วันที่ (แสดงผล)']||'',
         shift:       r['เวร (ด/ช/บ)']||'',
         shiftName:   r['ชื่อเวร']||'',
@@ -1429,6 +1455,18 @@ function updateDailyProdPreview(){
 // ════════════════════════════════════════════════════════════
 // ★ DATE RANGE FILTER ★
 // ════════════════════════════════════════════════════════════
+function setLatestDate(){
+  // ไปที่วันที่มีข้อมูลล่าสุดใน Sheets
+  if(!dailyRecs.length){ toast('ยังไม่มีข้อมูล','info'); return; }
+  const dates = dailyRecs.map(r=>r.date).filter(Boolean).sort();
+  const latest = dates[dates.length-1];
+  if(!latest) return;
+  document.getElementById('filterFrom').value = latest;
+  document.getElementById('filterTo').value   = latest;
+  applyFilter();
+  toast('แสดงข้อมูลวัน '+thDateFromISO(latest),'info');
+}
+
 function setQuickRange(days){
   const today=new Date();
   const from=new Date(today);
@@ -1717,12 +1755,24 @@ async function saveAE(){
 function refreshDaily(){
   const today=fISO(new Date());
   const filtered=getFilteredDailyRecs();
+
+  // ★ Debug: ตรวจสอบ date format จาก Sheets ★
+  if(dailyRecs.length>0 && !dailyRecs.some(r=>r.date===today)){
+    // มีข้อมูลแต่ไม่มีวันนี้ — แสดงข้อมูลล่าสุดแทน
+    const lastDate = dailyRecs.map(r=>r.date).filter(Boolean).sort().reverse()[0]||'';
+    if(lastDate && lastDate !== today){
+      console.log('IPD v8: date format check — Sheets date:', lastDate, '| today:', today);
+    }
+  }
+
   const todayRecs=dailyRecs.filter(r=>r.date===today);
 
   const sumA=todayRecs.reduce((a,r)=>a+r.admit,0);
   const sumD=todayRecs.reduce((a,r)=>a+r.discharge,0);
   const sumR=todayRecs.reduce((a,r)=>a+r.refer,0);
+  // ถ้าไม่มีข้อมูลวันนี้ ให้ใช้ข้อมูลล่าสุดแทนเพื่อแสดง KPI
   const last=todayRecs.length?todayRecs[todayRecs.length-1]:null;
+  const latestDate = dailyRecs.length ? [...dailyRecs].sort((a,b)=>b.date.localeCompare(a.date))[0]?.date : null;
   const avgP=todayRecs.length?Math.round(todayRecs.reduce((a,r)=>a+r.prod,0)/todayRecs.length):null;
 
   set('v-census',last?last.census:'—'); set('v-admit',todayRecs.length?sumA:'—');
